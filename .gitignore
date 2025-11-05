@@ -63,8 +63,6 @@ data/
 
 # Large data files (excluded due to GitHub size limits)
 *.zip
-auair2019data.zip
-auair2019annotations.zip
 
 # Large files (uncomment if you want to exclude these)
 # *.jpg
