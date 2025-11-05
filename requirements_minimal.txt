@@ -1,0 +1,10 @@
+# Minimal requirements for flight_path_visualizer.py only
+# Core dependencies tested with Python 3.10.19 in cvnav environment
+
+matplotlib==3.10.7         # Static 3D plotting and 2D analysis plots
+numpy==2.2.6               # Numerical operations and array handling  
+plotly==6.3.1              # Interactive 3D HTML plots with mouse rotation
+
+# Optional but recommended for data handling
+pandas==2.3.2              # Data manipulation (used for enhanced data processing)
+scipy==1.15.3              # Scientific computing (used by matplotlib for some operations)

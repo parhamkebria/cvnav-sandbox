@@ -1,0 +1,41 @@
+# Requirements for cvnav conda environment (Python >= 3.10)
+# Tested and verified working with Python 3.10.19
+
+# === CORE FLIGHT PATH VISUALIZER DEPENDENCIES ===
+matplotlib==3.10.7         # 3D plotting and static visualizations
+numpy==2.2.6               # Numerical operations and data handling  
+plotly==6.3.1              # Interactive 3D HTML plots with mouse rotation
+pandas==2.3.2              # Data manipulation and analysis
+scipy==1.15.3              # Scientific computing utilities
+
+# === DEEP LEARNING FRAMEWORK (PyTorch with CUDA) ===
+torch==2.9.0               # Main PyTorch framework with CUDA support
+torchvision==0.24.0        # Computer vision utilities
+torchaudio==2.9.0          # Audio processing utilities
+torchmetrics==1.8.2        # Machine learning metrics
+
+# === COMPUTER VISION & IMAGE PROCESSING ===
+Pillow==12.0.0             # Image processing library
+opencv-python==4.12.0.88   # Computer vision operations
+
+# === MACHINE LEARNING & UTILITIES ===
+scikit-learn==1.7.2        # Machine learning algorithms
+einops==0.8.1              # Tensor operations made easy
+tqdm==4.67.1               # Progress bars
+timm==1.0.17               # PyTorch image models
+lpips==0.1.4               # Perceptual similarity metrics
+
+# === CONFIGURATION & LOGGING ===
+PyYAML==6.0.3              # YAML configuration files
+wandb==0.22.3              # Experiment tracking and logging
+
+# === DEVELOPMENT TOOLS ===
+black==25.9.0              # Code formatter
+flake8==7.3.0              # Linting and style guide enforcement
+pytest==8.4.2             # Testing framework
+
+# === ADDITIONAL DEPENDENCIES (Already installed in cvnav) ===
+# These are available but not strictly required for flight visualization
+requests==2.32.5           # HTTP library
+packaging==25.0             # Package utilities
+setuptools==80.9.0         # Python package setup tools
