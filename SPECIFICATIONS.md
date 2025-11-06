@@ -1,4 +1,4 @@
-# AuAir Project Development Chat History
+# AuAir Project Development
 
 This file contains the development history and key decisions made during the creation of this drone navigation project.
 
