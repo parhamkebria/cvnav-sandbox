@@ -19,7 +19,7 @@ cfg = SimpleNamespace(
 
     # training
     batch_size = 2,  # Reduce batch size for stability
-    epochs = 3,
+    epochs = 10,
     lr = 5e-5,  # Reduced learning rate for stability
     weight_decay = 1e-3,  # Reduced weight decay
     image_loss_weight = 1.0,
@@ -36,5 +36,5 @@ cfg = SimpleNamespace(
     prefetch_factor = 4,  # Prefetch more batches
     
     # testing/debugging
-    dataset_fraction = 0.1,  # Increased to 10% for better training
+    dataset_fraction = 0.25,
 )

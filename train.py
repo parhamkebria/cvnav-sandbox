@@ -10,6 +10,8 @@ from config import cfg
 import csv
 from datetime import datetime
 from utils import save_nav_stats, print_nav_stats_summary
+import shutil
+width = shutil.get_terminal_size().columns
 
 import warnings
 warnings.filterwarnings("ignore", message="Was asked to gather along dimension 0")
@@ -279,4 +281,5 @@ def train():
     print(f"Validation log saved to: {val_csv_path}")
 
 if __name__ == "__main__":
+    print("=" * width)
     train()
