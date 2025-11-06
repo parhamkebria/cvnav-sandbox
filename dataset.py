@@ -57,9 +57,15 @@ class DroneSeqDataset(Dataset):
         
         # Proper image transforms: ToTensor first, then normalize
         self.transform = transform or T.Compose([
-            T.Resize((256, 448)),  # downsize to speed training
+            T.Resize((256, 256)),  # Square images for simplicity
             T.ToTensor(),  # Converts PIL Image to tensor and scales to [0, 1]
             T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),  # ImageNet normalization
+        ])
+        
+        # Collect image paths and ensure proper ordering
+        self.image_files = sorted([
+            f for f in os.listdir(root_dir)
+            if f.endswith(".jpg") or f.endswith(".png")
         ])
         
         # Navigation normalization statistics
@@ -116,6 +122,7 @@ class DroneSeqDataset(Dataset):
 
     def __len__(self):
         return len(self.indices)
+        # return len(self.image_files) - self.seq_len
 
     def __getitem__(self, idx):
         i = self.indices[idx]
@@ -161,10 +168,12 @@ class DroneSeqDataset(Dataset):
             "tgt_nav": torch.from_numpy(tgt_nav_normalized.astype(np.float32)),   # ground-truth next nav (normalized)
         }
 
-def make_dataloader(root, seq_len=4, batch_size=2, shuffle=True, num_workers=4, annotation_dir=None, sampler=None, nav_stats=None):
+def make_dataloader(root, seq_len=4, batch_size=2, shuffle=True, num_workers=4, annotation_dir=None, sampler=None, nav_stats=None, pin_memory=True, prefetch_factor=2):
     ds = DroneSeqDataset(root, seq_len=seq_len, annotation_dir=annotation_dir, nav_stats=nav_stats)
     # If sampler is provided (e.g., DistributedSampler), don't shuffle
     if sampler is not None:
         shuffle = False
     return DataLoader(ds, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers, 
-                    pin_memory=True, sampler=sampler, persistent_workers=True if num_workers > 0 else False), ds.nav_stats
+                    pin_memory=pin_memory, sampler=sampler, 
+                    persistent_workers=True if num_workers > 0 else False,
+                    prefetch_factor=prefetch_factor), ds.nav_stats

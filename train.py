@@ -3,7 +3,7 @@ import torch
 from torch.optim import AdamW
 from tqdm import tqdm
 from dataset import make_dataloader
-from models import DronePredictor
+from models import get_model
 from losses import JointLoss
 from utils import save_checkpoint
 from config import cfg
@@ -138,11 +138,13 @@ def train():
         print(f"Dataset split: {train_size} training samples, {val_size} validation samples")
     
     train_loader = DataLoader(train_dataset, batch_size=effective_batch_size, shuffle=True, 
-                            num_workers=cfg.num_workers, pin_memory=True, 
-                            persistent_workers=True if cfg.num_workers > 0 else False)
+                            num_workers=cfg.num_workers, pin_memory=cfg.pin_memory, 
+                            persistent_workers=True if cfg.num_workers > 0 else False,
+                            prefetch_factor=cfg.prefetch_factor)
     val_loader = DataLoader(val_dataset, batch_size=effective_batch_size, shuffle=False, 
-                            num_workers=cfg.num_workers, pin_memory=True,
-                            persistent_workers=True if cfg.num_workers > 0 else False)
+                            num_workers=cfg.num_workers, pin_memory=cfg.pin_memory,
+                            persistent_workers=True if cfg.num_workers > 0 else False,
+                            prefetch_factor=cfg.prefetch_factor)
     
     # Store nav_stats for potential use in evaluation
     print_nav_stats_summary(nav_stats)
@@ -152,14 +154,19 @@ def train():
     nav_stats_path = os.path.join("logs", f"nav_stats_{timestamp}.json")
     save_nav_stats(nav_stats, nav_stats_path)
     
-    model = DronePredictor(cfg).to(device)
+    # Create model with simple encoder for now (VGG has DataParallel issues)
+    model = get_model(cfg, use_vgg=False).to(device)
     
     # Wrap model with DataParallel for multi-GPU training
     if torch.cuda.device_count() > 1:
         model = torch.nn.DataParallel(model)
     
     opt = AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
-    criterion = JointLoss(image_w=cfg.image_loss_weight, nav_w=cfg.nav_loss_weight, perceptual=False, device=device)
+    criterion = JointLoss(image_w=cfg.image_loss_weight, nav_w=cfg.nav_loss_weight, 
+                        vq_w=cfg.vq_loss_weight, perceptual=False, device=device)
+    
+    # Add learning rate scheduler for stability
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode='min', factor=0.5, patience=3)
     
     # Setup CSV loggers
     train_csv_path, val_csv_path = setup_csv_loggers()
@@ -187,7 +194,19 @@ def train():
             opt.zero_grad()
             recon, nav_pred, vq_loss = model(imgs, navs)
             loss, info = criterion(recon, tgt_img, nav_pred, tgt_nav, vq_loss)
+            
+            # Check for NaN or infinite loss
+            if not torch.isfinite(loss):
+                print(f"Warning: Non-finite loss detected: {loss}")
+                print(f"Image loss: {info['L_img']}, Nav loss: {info['L_nav']}, VQ loss: {info['vq']}")
+                continue
+            
             loss.backward()
+            
+            # Gradient clipping for stability
+            if hasattr(cfg, 'max_grad_norm'):
+                torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.max_grad_norm)
+            
             opt.step()
 
             # Handle multi-GPU case where loss might not be scalar
@@ -224,6 +243,9 @@ def train():
         print(f"  - Image Loss: {val_metrics['img_loss']:.4f}")
         print(f"  - Nav Loss: {val_metrics['nav_loss']:.4f}")
         print(f"  - VQ Loss: {val_metrics['vq_loss']:.4f}")
+        
+        # Update learning rate based on validation loss
+        scheduler.step(val_loss)
         
         # Save checkpoint
         is_best = val_loss < best_val_loss

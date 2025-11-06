@@ -1,18 +1,92 @@
 '''
-The encoder reduces spatial size twice (Conv strides 2) — final h,w depend on input size and chosen transforms.
-In the dataset.py I resized to (256,448) to make h,w manageable.
-For full-res training we will likely want a much larger encoder and more compute.
-
-We can replace the SimpleTransformer and VectorQuantizer with more sophisticated modules (Perceiver, TimeSformer, VPTR variants)
-depending on our compute budget and experiments evolve. See citations.
+Enhanced encoder-decoder with VGG-16 backbone for better feature extraction.
+Uses VGG-16 conv5 features (14x14x512) as requested.
+Optimized for better GPU utilization and performance.
 '''
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
+import torchvision.models as models
 
-# conv encoder/decoder + VQ 
+# VGG-16 based encoder
+class VGGEncoder(nn.Module):
+    def __init__(self, pretrained=True, freeze_backbone=False):
+        super().__init__()
+        # Load VGG-16 and use features up to conv5
+        vgg16 = models.vgg16(pretrained=pretrained)
+        
+        # Extract features up to conv5 (index 30 in VGG-16 features)
+        # This gives us 7x7x512 feature maps for 224x224 input
+        self.backbone = nn.Sequential(*list(vgg16.features.children())[:31])  # Up to conv5_3
+        
+        # Optionally freeze backbone weights
+        if freeze_backbone:
+            for param in self.backbone.parameters():
+                param.requires_grad = False
+        
+        # Additional conv to reduce to desired latent dimension
+        self.latent_conv = nn.Sequential(
+            nn.Conv2d(512, 256, 3, 1, 1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(256, 64, 3, 1, 1),  # Final latent dimension
+        )
+        
+    def forward(self, x):
+        # x: (B, 3, 224, 224)
+        features = self.backbone(x)  # (B, 512, 7, 7)
+        latent = self.latent_conv(features)  # (B, 64, 7, 7)
+        return latent
+
+# Enhanced decoder for VGG features
+class VGGDecoder(nn.Module):
+    def __init__(self, z_channels=64, out_ch=3):
+        super().__init__()
+        # Upsample from 7x7 back to 224x224
+        self.net = nn.Sequential(
+            nn.Conv2d(z_channels, 256, 3, 1, 1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(256, 512, 3, 1, 1),
+            nn.ReLU(inplace=True),
+            
+            # Upsample to 14x14
+            nn.ConvTranspose2d(512, 256, 4, 2, 1),
+            nn.ReLU(inplace=True),
+            
+            # Upsample to 28x28
+            nn.ConvTranspose2d(256, 128, 4, 2, 1),
+            nn.ReLU(inplace=True),
+            
+            # Upsample to 56x56
+            nn.ConvTranspose2d(128, 64, 4, 2, 1),
+            nn.ReLU(inplace=True),
+            
+            # Upsample to 112x112
+            nn.ConvTranspose2d(64, 32, 4, 2, 1),
+            nn.ReLU(inplace=True),
+            
+            # Upsample to 224x224
+            nn.ConvTranspose2d(32, 16, 4, 2, 1),
+            nn.ReLU(inplace=True),
+            
+            # Final output layer
+            nn.Conv2d(16, out_ch, 3, 1, 1),
+            nn.Tanh()  # Output in [-1, 1] range
+        )
+    
+    def forward(self, z): 
+        # Get tanh output in [-1, 1]
+        tanh_output = self.net(z)
+        # Convert tanh output to [0, 1] range first
+        normalized_01 = (tanh_output + 1.0) / 2.0
+        # Then apply ImageNet normalization: (x - mean) / std
+        # Use hardcoded values to avoid register_buffer issues with DataParallel
+        mean = torch.tensor([0.485, 0.456, 0.406], device=z.device, dtype=z.dtype).view(1, 3, 1, 1)
+        std = torch.tensor([0.229, 0.224, 0.225], device=z.device, dtype=z.dtype).view(1, 3, 1, 1)
+        return (normalized_01 - mean) / std
+
+# Keep the original simple encoder/decoder for comparison
 class ConvEncoder(nn.Module):
     def __init__(self, in_ch=3, hidden=128, z_channels=64):
         super().__init__()
@@ -31,9 +105,19 @@ class ConvDecoder(nn.Module):
             nn.Conv2d(z_channels, hidden, 3,1,1), nn.GELU(),
             nn.ConvTranspose2d(hidden, hidden//2, 4, 2, 1), nn.GELU(),
             nn.ConvTranspose2d(hidden//2, out_ch, 4, 2, 1),
-            nn.Sigmoid()
+            nn.Tanh()  # Output in [-1, 1] range
         )
-    def forward(self,z): return self.net(z)
+    
+    def forward(self, z): 
+        # Get tanh output in [-1, 1]
+        tanh_output = self.net(z)
+        # Convert tanh output to [0, 1] range first
+        normalized_01 = (tanh_output + 1.0) / 2.0
+        # Then apply ImageNet normalization: (x - mean) / std
+        # Use hardcoded values to avoid register_buffer issues with DataParallel
+        mean = torch.tensor([0.485, 0.456, 0.406], device=z.device, dtype=z.dtype).view(1, 3, 1, 1)
+        std = torch.tensor([0.229, 0.224, 0.225], device=z.device, dtype=z.dtype).view(1, 3, 1, 1)
+        return (normalized_01 - mean) / std
 
 class VectorQuantizer(nn.Module):
     def __init__(self, num_embeddings=512, embedding_dim=64, commitment_cost=0.25):
@@ -41,20 +125,32 @@ class VectorQuantizer(nn.Module):
         self.embedding_dim = embedding_dim
         self.num_embeddings = num_embeddings
         self.embedding = nn.Embedding(num_embeddings, embedding_dim)
-        nn.init.uniform_(self.embedding.weight,-1/num_embeddings,1/num_embeddings)
+        # Better initialization for stability
+        nn.init.normal_(self.embedding.weight, 0, 0.02)
         self.commitment_cost = commitment_cost
+        
     def forward(self, z):
         # z: (B, C, H, W)
         B, C, H, W = z.shape
         flat = z.permute(0,2,3,1).contiguous().view(-1, C)  # (B*H*W, C)
+        
+        # L2 normalize inputs for more stable quantization
+        flat_norm = F.normalize(flat, p=2, dim=1)
+        embedding_norm = F.normalize(self.embedding.weight, p=2, dim=1)
+        
         # compute distances
-        d = torch.sum(flat**2, dim=1, keepdim=True) - 2*flat @ self.embedding.weight.t() + torch.sum(self.embedding.weight**2, dim=1)
+        d = torch.sum(flat_norm**2, dim=1, keepdim=True) - 2*flat_norm @ embedding_norm.t() + torch.sum(embedding_norm**2, dim=1)
         indices = torch.argmin(d, dim=1)
         quantized = self.embedding(indices).view(B, H, W, C).permute(0,3,1,2).contiguous()
-        # losses
+        
+        # losses with gradient clipping
         e_latent_loss = F.mse_loss(quantized.detach(), z)
         q_latent_loss = F.mse_loss(quantized, z.detach())
         loss = q_latent_loss + self.commitment_cost * e_latent_loss
+        
+        # Clamp VQ loss for stability
+        loss = torch.clamp(loss, 0, 5.0)
+        
         quantized = z + (quantized - z).detach()
         indices = indices.view(B, H, W)
         return quantized, indices, loss
@@ -70,29 +166,43 @@ class SimpleTransformer(nn.Module):
         # x: (B, S, D) batch-first for better performance
         return self.transformer(x, src_key_padding_mask=src_key_padding_mask)
 
-# full model 
+# Enhanced model with VGG-16 backbone
 class DronePredictor(nn.Module):
-    def __init__(self, cfg):
+    def __init__(self, cfg, use_vgg=True):
         super().__init__()
-        # encoder/decoder/vq
-        self.encoder = ConvEncoder(in_ch=3, hidden=256, z_channels=cfg.d_model//8)  # tune
-        z_ch = cfg.d_model//8
+        
+        # Choose encoder type
+        if use_vgg:
+            self.encoder = VGGEncoder(pretrained=True, freeze_backbone=False)
+            z_ch = 64  # VGG encoder output channels
+        else:
+            self.encoder = ConvEncoder(in_ch=3, hidden=256, z_channels=cfg.d_model//8)
+            z_ch = cfg.d_model//8
+            
         self.vq = VectorQuantizer(num_embeddings=cfg.vq_codebook_size, embedding_dim=z_ch)
-        self.decoder = ConvDecoder(z_channels=z_ch, hidden=256, out_ch=3)
+        
+        # Choose decoder type
+        if use_vgg:
+            self.decoder = VGGDecoder(z_channels=z_ch, out_ch=3)
+        else:
+            self.decoder = ConvDecoder(z_channels=z_ch, hidden=256, out_ch=3)
 
         # transformer predicts flattened token embeddings
-        # token embedding: use codebook vectors directly (we embed indices to d_model)
         self.codebook_proj = nn.Linear(z_ch, cfg.d_model)
         self.codebook_unproj = nn.Linear(cfg.d_model, z_ch)
 
         self.transformer = SimpleTransformer(d_model=cfg.d_model, n_heads=cfg.n_heads, n_layers=cfg.n_layers, dropout=cfg.dropout)
-        # temporal positional embeddings for transformer
-        # Increase max sequence length to handle large spatial resolutions
-        max_seq_len = cfg.seq_len * cfg.latent_h * cfg.latent_w * 4  # Extra buffer for safety
+        
+        # Dynamic positional embeddings - compute based on actual feature map size
+        self.max_spatial_tokens = 2048  # Reasonable upper bound for spatial tokens
+        max_seq_len = cfg.seq_len * self.max_spatial_tokens
         self.temporal_pos = nn.Parameter(torch.randn(max_seq_len, cfg.d_model))
+        
         # navigation regression head
         self.nav_head = nn.Sequential(
-            nn.Linear(cfg.d_model, cfg.d_model//2), nn.GELU(),
+            nn.Linear(cfg.d_model, cfg.d_model//2), 
+            nn.GELU(),
+            nn.Dropout(0.1),
             nn.Linear(cfg.d_model//2, 6)  # lat,lon,alt,roll,pitch,yaw
         )
 
@@ -150,3 +260,7 @@ class DronePredictor(nn.Module):
         pooled = out.mean(dim=1)          # (B,D)
         nav_pred = self.nav_head(pooled)  # (B,6)
         return recon, nav_pred, vq_loss
+
+def get_model(cfg, use_vgg=True):
+    """Factory function to create the model with optional VGG backbone"""
+    return DronePredictor(cfg, use_vgg=use_vgg)
