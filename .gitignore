@@ -59,6 +59,7 @@ Thumbs.db
 checkpoints/
 logs/
 data/
+plots/
 *.log
 *.png
 
