@@ -1,8 +1,8 @@
 from types import SimpleNamespace
 
 cfg = SimpleNamespace(
-    data_root = "/home/parham/AuAir/data/images",
-    annotation_root = "/home/parham/AuAir/data/annotations/annotation_files",
+    data_root = "/home/parham/auairDataset/images",
+    annotation_root = "/home/parham/auairDataset/annotations/annotation_files",
     seq_len = 4,          # number of input frames
     pred_steps = 1,       # predict 1 next frame
     img_size = (1920,1080),
