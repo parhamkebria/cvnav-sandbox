@@ -61,6 +61,7 @@ logs/
 data/
 *.log
 *.png
+
 # Large data files (excluded due to GitHub size limits)
 *.zip
 
