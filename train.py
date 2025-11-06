@@ -166,7 +166,8 @@ def train():
                         vq_w=cfg.vq_loss_weight, perceptual=False, device=device)
     
     # Add learning rate scheduler for stability
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode='min', factor=0.5, patience=3)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode='min',
+                                                        factor=0.5, patience=3)
     
     # Setup CSV loggers
     train_csv_path, val_csv_path = setup_csv_loggers()
