@@ -55,7 +55,7 @@ for img_path in image_files:
         print(f"Warning: Skipping unreadable image {img_path}")
         continue
 
-    # Read annotation JSON
+    # Read annotation data
     annotation_text = "(no annotation)"
     if os.path.exists(annotation_path):
         try:
@@ -70,23 +70,108 @@ for img_path in image_files:
                         annotation_text += f"\nLat: {pos['lat']:.6f}, Lon: {pos['lon']:.6f}"
                 if 'altitude' in annotation_data:
                     annotation_text += f"\nAltitude: {annotation_data['altitude']:.1f}m"
+                # Add roll, pitch, yaw information
+                if 'roll' in annotation_data:
+                    annotation_text += f"\nRoll: {annotation_data['roll']:.3f}°"
+                if 'pitch' in annotation_data:
+                    annotation_text += f"\nPitch: {annotation_data['pitch']:.3f}°"
+                if 'yaw' in annotation_data:
+                    annotation_text += f"\nYaw: {annotation_data['yaw']:.3f}°"
         except (json.JSONDecodeError, KeyError) as e:
             print(f"Warning: Could not parse annotation file {annotation_path}: {e}")
             annotation_text = "(annotation parse error)"
     else:
-        # Also check for .txt files for backward compatibility
+        # Check for .txt files and parse them
         txt_annotation_path = os.path.join(annotations_dir, filename + ".txt")
         if os.path.exists(txt_annotation_path):
-            with open(txt_annotation_path, "r", encoding="utf-8") as f:
-                annotation_text = f.read().strip()
+            try:
+                with open(txt_annotation_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                    
+                # Parse the txt format to extract key data
+                annotation_text = ""
+                lines = content.split('\n')
+                
+                # Extract data from the structured txt format
+                latitude = longitude = altitude = None
+                roll = pitch = yaw = None
+                timestamp_parts = {}
+                
+                for line in lines:
+                    line = line.strip()
+                    if line.startswith('latitude:'):
+                        latitude = float(line.split(':')[1].strip())
+                    elif line.startswith('longtitude:'):  # Note: typo in original data
+                        longitude = float(line.split(':')[1].strip())
+                    elif line.startswith('altitude:'):
+                        altitude = float(line.split(':')[1].strip())
+                    elif line.startswith('angle_phi:'):  # Roll
+                        roll = float(line.split(':')[1].strip()) * 57.2958  # Convert radians to degrees
+                    elif line.startswith('angle_theta:'):  # Pitch
+                        pitch = float(line.split(':')[1].strip()) * 57.2958  # Convert radians to degrees
+                    elif line.startswith('angle_psi:'):  # Yaw
+                        yaw = float(line.split(':')[1].strip()) * 57.2958  # Convert radians to degrees
+                    elif 'year:' in line:
+                        timestamp_parts['year'] = line.split(':')[1].strip()
+                    elif 'month:' in line:
+                        timestamp_parts['month'] = line.split(':')[1].strip()
+                    elif 'day:' in line:
+                        timestamp_parts['day'] = line.split(':')[1].strip()
+                    elif 'hour:' in line:
+                        timestamp_parts['hour'] = line.split(':')[1].strip()
+                    elif 'min:' in line:
+                        timestamp_parts['min'] = line.split(':')[1].strip()
+                    elif 'sec:' in line:
+                        timestamp_parts['sec'] = line.split(':')[1].strip()
+                
+                # Build annotation text
+                if len(timestamp_parts) >= 6:
+                    annotation_text = f"Time: {timestamp_parts['year']}-{timestamp_parts['month'].zfill(2)}-{timestamp_parts['day'].zfill(2)} {timestamp_parts['hour'].zfill(2)}:{timestamp_parts['min'].zfill(2)}:{timestamp_parts['sec'].zfill(2)}"
+                
+                if latitude is not None and longitude is not None:
+                    annotation_text += f"\nLat: {latitude:.6f}, Lon: {longitude:.6f}"
+                
+                if altitude is not None:
+                    annotation_text += f"\nAltitude: {altitude:.1f}m"
+                
+                if roll is not None:
+                    annotation_text += f"\nRoll: {roll:.3f}°"
+                
+                if pitch is not None:
+                    annotation_text += f"\nPitch: {pitch:.3f}°"
+                
+                if yaw is not None:
+                    annotation_text += f"\nYaw: {yaw:.3f}°"
+                    
+            except Exception as e:
+                print(f"Warning: Could not parse txt annotation file {txt_annotation_path}: {e}")
+                annotation_text = "(annotation parse error)"
 
-    # Draw annotation on image
-    (text_width, text_height), _ = cv2.getTextSize(annotation_text, font, font_scale, font_thickness)
-    text_x, text_y = 10, 30  # upper-left position
-    cv2.rectangle(img, (text_x - 5, text_y - text_height - 5),
-                        (text_x + text_width + 5, text_y + 5), bg_color, -1)
-    cv2.putText(img, annotation_text, (text_x, text_y),
-                font, font_scale, font_color, font_thickness, cv2.LINE_AA)
+    # Draw annotation on image (handle multi-line text)
+    if annotation_text:
+        lines = annotation_text.split('\n')
+        text_x, text_y = 10, 30  # upper-left position
+        line_height = 30  # spacing between lines
+        
+        # Calculate total text area for background rectangle
+        max_width = 0
+        total_height = len(lines) * line_height
+        
+        for line in lines:
+            if line.strip():  # Skip empty lines
+                (line_width, line_height_px), _ = cv2.getTextSize(line, font, font_scale, font_thickness)
+                max_width = max(max_width, line_width)
+        
+        # Draw background rectangle
+        cv2.rectangle(img, (text_x - 5, text_y - 25),
+                    (text_x + max_width + 10, text_y + total_height + 5), bg_color, -1)
+        
+        # Draw each line of text
+        for i, line in enumerate(lines):
+            if line.strip():  # Skip empty lines
+                y_pos = text_y + (i * line_height)
+                cv2.putText(img, line, (text_x, y_pos),
+                            font, font_scale, font_color, font_thickness, cv2.LINE_AA)
 
     # Write frame to video
     video_writer.write(img)
