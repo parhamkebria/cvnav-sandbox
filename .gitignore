@@ -62,6 +62,7 @@ data/
 plots/
 *.log
 *.png
+*.mp4
 
 # Large data files (excluded due to GitHub size limits)
 *.zip
