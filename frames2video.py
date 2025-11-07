@@ -18,9 +18,10 @@ output_video = "output_video.mp4"
 fps = 10  # frames per second
 font = cv2.FONT_HERSHEY_SIMPLEX
 font_scale = 1.0
-font_color = (255, 255, 255)  # white text
+font_color = (0, 0, 0)  # black text
 font_thickness = 2
 bg_color = (0, 0, 0)  # background box for better readability
+MAX_FRAME = 32823  # Limit number of frames to process for testing
 
 print(f"Using images directory: {images_dir}")
 print(f"Using annotations directory: {annotations_dir}")
@@ -43,6 +44,7 @@ fourcc = cv2.VideoWriter_fourcc(*'mp4v')
 video_writer = cv2.VideoWriter(output_video, fourcc, fps, (width, height))
 
 # === PROCESS EACH IMAGE ===
+frame_count = 0
 for img_path in image_files:
     filename = os.path.splitext(os.path.basename(img_path))[0]
     
@@ -54,7 +56,9 @@ for img_path in image_files:
     if img is None:
         print(f"Warning: Skipping unreadable image {img_path}")
         continue
-
+    frame_count += 1
+    if frame_count > MAX_FRAME:
+        break
     # Read annotation data
     annotation_text = "(no annotation)"
     if os.path.exists(annotation_path):
@@ -69,14 +73,14 @@ for img_path in image_files:
                     if 'lat' in pos and 'lon' in pos:
                         annotation_text += f"\nLat: {pos['lat']:.6f}, Lon: {pos['lon']:.6f}"
                 if 'altitude' in annotation_data:
-                    annotation_text += f"\nAltitude: {annotation_data['altitude']:.1f}m"
+                    annotation_text += f"\nAltitude (m): {annotation_data['altitude']:.1f}"
                 # Add roll, pitch, yaw information
                 if 'roll' in annotation_data:
-                    annotation_text += f"\nRoll: {annotation_data['roll']:.3f}°"
+                    annotation_text += f"\nRoll (deg): {annotation_data['roll']:.3f}"
                 if 'pitch' in annotation_data:
-                    annotation_text += f"\nPitch: {annotation_data['pitch']:.3f}°"
+                    annotation_text += f"\nPitch (deg): {annotation_data['pitch']:.3f}"
                 if 'yaw' in annotation_data:
-                    annotation_text += f"\nYaw: {annotation_data['yaw']:.3f}°"
+                    annotation_text += f"\nYaw (deg): {annotation_data['yaw']:.3f}"
         except (json.JSONDecodeError, KeyError) as e:
             print(f"Warning: Could not parse annotation file {annotation_path}: {e}")
             annotation_text = "(annotation parse error)"
@@ -132,16 +136,16 @@ for img_path in image_files:
                     annotation_text += f"\nLat: {latitude:.6f}, Lon: {longitude:.6f}"
                 
                 if altitude is not None:
-                    annotation_text += f"\nAltitude: {altitude:.1f}m"
+                    annotation_text += f"\nAltitude (m): {altitude:.1f}"
                 
                 if roll is not None:
-                    annotation_text += f"\nRoll: {roll:.3f}°"
+                    annotation_text += f"\nRoll (deg): {roll:.3f}"
                 
                 if pitch is not None:
-                    annotation_text += f"\nPitch: {pitch:.3f}°"
+                    annotation_text += f"\nPitch (deg): {pitch:.3f}"
                 
                 if yaw is not None:
-                    annotation_text += f"\nYaw: {yaw:.3f}°"
+                    annotation_text += f"\nYaw (deg): {yaw:.3f}"
                     
             except Exception as e:
                 print(f"Warning: Could not parse txt annotation file {txt_annotation_path}: {e}")
@@ -163,8 +167,8 @@ for img_path in image_files:
                 max_width = max(max_width, line_width)
         
         # Draw background rectangle
-        cv2.rectangle(img, (text_x - 5, text_y - 25),
-                    (text_x + max_width + 10, text_y + total_height + 5), bg_color, -1)
+        # cv2.rectangle(img, (text_x - 5, text_y - 25),
+        #             (text_x + max_width + 10, text_y + total_height + 5), bg_color, -1)
         
         # Draw each line of text
         for i, line in enumerate(lines):
@@ -174,7 +178,8 @@ for img_path in image_files:
                             font, font_scale, font_color, font_thickness, cv2.LINE_AA)
 
     # Write frame to video
+    print(f"Writing frame {frame_count} to video", end="\r")
     video_writer.write(img)
 
 video_writer.release()
-print(f"✅ Video saved as: {output_video}")
+print(f"Video saved as: {output_video}")
