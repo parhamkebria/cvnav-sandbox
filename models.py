@@ -1,6 +1,6 @@
 '''
 Enhanced encoder-decoder with VGG-16 backbone for better feature extraction.
-Uses VGG-16 conv5 features (14x14x512) as requested.
+Uses VGG-16 conv5 features (14x14x512).
 Optimized for better GPU utilization and performance.
 '''
 
